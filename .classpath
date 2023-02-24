@@ -26,7 +26,6 @@
 	<classpathentry kind="lib" path="userlib/fontbox-2.0.24.jar"/>
 	<classpathentry kind="lib" path="userlib/guava-30.1.1-jre.jar"/>
 	<classpathentry kind="lib" path="userlib/j2objc-annotations-1.3.jar"/>
-	<classpathentry kind="lib" path="userlib/javax.mail.jar"/>
 	<classpathentry kind="lib" path="userlib/jcip-annotations-1.0-1.jar"/>
 	<classpathentry kind="lib" path="userlib/json-smart-2.4.7.jar"/>
 	<classpathentry kind="lib" path="userlib/jsr305-3.0.2.jar"/>

@@ -12,24 +12,14 @@ package emlfilegeneration.actions;
 import com.mendix.systemwideinterfaces.core.IContext;
 import com.mendix.webui.CustomJavaAction;
 import com.mendix.systemwideinterfaces.core.IMendixObject;
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
-import java.util.Date;
-import java.util.logging.Logger;
-import javax.activation.DataHandler;
-import javax.activation.DataSource;
+import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.activation.MimetypesFileTypeMap;
-import javax.mail.Message;
-import javax.mail.MessagingException;
-import javax.mail.Multipart;
-import javax.mail.Session;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeBodyPart;
-import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
-import javax.mail.util.ByteArrayDataSource;
 import com.mendix.core.Core;
 import com.mendix.core.CoreException;
 import com.mendix.logging.ILogNode;
@@ -77,77 +67,85 @@ public class JA_GenerateEMLFile extends CustomJavaAction<java.lang.Boolean>
 
 		// BEGIN USER CODE
 		ILogNode logger = Core.getLogger("Generate EML File");
-
 		boolean emailWriteSuccess = false;
-		
-	
-		if (From.isEmpty() || To.isEmpty() ||  DateSent==null) {
-			logger.error("From,To and DateSent should not be empty");
+
+		if (From.isEmpty() || To.isEmpty() || DateSent == null) {
+			logger.warn("From, To, and DateSent should not be empty");
 			return false;
 		}
-		
-		Message msg = createMessage(From, To, CC, BCC, Subject, HTMLBody, DateSent);
-		Multipart multipart = new MimeMultipart();
 
-		// creates body part for the message
-		MimeBodyPart messageBodyPart = new MimeBodyPart();
-		messageBodyPart.setContent(HTMLBody, "text/html; charset=utf-8");
+		String attachments = "";
 
-		
-		
-
-		if (!__AttachmentList.isEmpty()) { // If returns false, will continue to add attachment.
+		if (!__AttachmentList.isEmpty()) {
 			for (IMendixObject attachment : __AttachmentList) {
-				logger.info("id::" + attachment.getId());
+				logger.info("id: " + attachment.getId());
 				if (attachment != null) {
-					logger.info("inside attachment not null::" + attachment.getId());
+					logger.info("attachment not null: " + attachment.getId());
 					InputStream content = Core.getFileDocumentContent(getContext(), attachment);
 					String mimeType = (new MimetypesFileTypeMap())
 							.getContentType((String) attachment.getValue(getContext(), FILE_DOCUMENT_NAME));
 
 					try {
 						if (content != null) {
-							logger.info("inside content not null::" + attachment.getId());
-							// creates body part for the attachment
-							MimeBodyPart attachPart = new MimeBodyPart();
-							DataSource source = new ByteArrayDataSource(content, mimeType);
+							logger.info("content not null: " + attachment.getId());
 							String fileName = (String) attachment.getValue(getContext(), FILE_DOCUMENT_NAME);
-							attachPart.setDataHandler(new DataHandler(source));
-							attachPart.setFileName(fileName);
-							// adds parts to the multipart
-							multipart.addBodyPart(attachPart);
-							
+							attachments += "Content-Disposition: attachment; filename=" + fileName + ";\n"
+									+ "Content-Type: " + mimeType + "; name=" + fileName + ";\n\n"
+									+ new String(content.readAllBytes(), StandardCharsets.UTF_8) + "\n\n";
 						}
-
 					} catch (Exception e) {
 						throw new CoreException("Unable to attach attachment. " + e);
 					}
 				}
 			}
 		}
-		
-		// sets the Message body part
-		multipart.addBodyPart(messageBodyPart);
 
-		// sets the multipart as message's content
-		msg.setContent(multipart);
+		StringBuilder EML = new StringBuilder();
+		EML.append("From: " + From + "\n");
+		EML.append("To: " + To + "\n");
+		EML.append("CC: " + (CC == null ? "" : CC) + "\n");
+		EML.append("BCC: " + (BCC == null ? "" : BCC) + "\n");
+		EML.append("Subject: " + Subject + "\n");
+		EML.append("Date: " + DateSent + "\n");
+		EML.append("MIME-Version: 1.0\n");
+		EML.append("Content-Type: multipart/mixed; boundary=frontier\n\n");
+		EML.append("--frontier\n");
+		EML.append("Content-Type: text/html; charset=utf-8\n\n");
+		EML.append(HTMLBody + "\n");
+		EML.append("--frontier\n");
+		EML.append(attachments);
+		String FileName;
+		if (Subject != null && Subject != "") {
+			FileName = Subject;
+		} else {
+			FileName = EMLFileName;
+		}
+				
+		Pattern pt = Pattern.compile("[^a-zA-Z0-9]");
+		Matcher match = pt.matcher(FileName);
+		while (match.find()) {
+			String s = match.group();
+			FileName = FileName.replaceAll("\\" + s, " ");
+		}
+		FileName = FileName.trim();
 
 		String temppath = Core.getConfiguration().getTempPath().getAbsolutePath();
-		
-		String EMLFileNameValue=EMLFileName + ".eml";
-		String FilePath = temppath + "/" + EMLFileNameValue;
-		
-		File tempFile1 = new File(FilePath);
-		FileOutputStream fos = new FileOutputStream(tempFile1);
-		msg.writeTo(fos);
-		FileInputStream fis = new FileInputStream(tempFile1);
-		OutputFileDocument.setName(EMLFileNameValue);
-	
-		Core.storeFileDocumentContent(getContext(), OutputFileDocument.getMendixObject(), EMLFileNameValue, fis);
-		
-		emailWriteSuccess = true;
-		
-		return emailWriteSuccess;
+
+		String EMLFileNameValue = FileName + ".eml";
+		String filePath = temppath + "/" + EMLFileNameValue;
+		try (FileOutputStream fos = new FileOutputStream(filePath)) {
+			fos.write(EML.toString().getBytes(StandardCharsets.UTF_8));
+			try (FileInputStream fis = new FileInputStream(filePath)) {
+				OutputFileDocument.setName(EMLFileNameValue);
+				Core.storeFileDocumentContent(getContext(), OutputFileDocument.getMendixObject(), EMLFileNameValue,
+						fis);
+			}
+		} catch (IOException e) {
+			throw new CoreException("Unable to write EML file. " + e);
+		}
+
+		return true;
+
 		
 		
 		// END USER CODE
@@ -165,26 +163,5 @@ public class JA_GenerateEMLFile extends CustomJavaAction<java.lang.Boolean>
 
 	// BEGIN EXTRA CODE
 	private final static String FILE_DOCUMENT_NAME = "Name";
-	
-	
-	public MimeMessage createMessage(String from, String to, String cc, String bcc, String subject, String body,
-			Date date) throws MessagingException {
-		MimeMessage msg = new MimeMessage(Session.getInstance(System.getProperties()));
-		msg.setFrom(new InternetAddress(from));
-		msg.setRecipients(Message.RecipientType.TO, to);
-		if (cc!=null) {
-			msg.setRecipients(Message.RecipientType.CC, cc);	
-		}
-		if (bcc!=null) {
-			msg.setRecipients(Message.RecipientType.BCC, bcc);
-		}
-		if (subject!=null) {
-			msg.setSubject(subject);
-		}
-		
-		msg.setSentDate(date);
-		return msg;
-	}
-	
 	// END EXTRA CODE
 }
